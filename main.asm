@@ -10,6 +10,9 @@ data segment
     buffer db 100, 101 dup('$')
     buffer2 db 100, 101 dup('$')
     buffer3 db 100, 101 dup ('$')
+    buffer4 db 100, 101 dup ('$')
+    buffer5 db 100, 101 dup ('$')
+
     int_part db 100, 101 dup ('$')
     frac_part db 100, 101 dup ('$')
     int_part2 db 100, 10 dup ('$')
@@ -23,9 +26,12 @@ data segment
     CONST_2 dw 2
     carry db 0
     carry2 db 0
+    sub_carry db 0
+    sub_carry2 db 0
+    cmpres db 0
+    is_integer db 0
+
 data ends
-
-
 code segment
 clear macro string
     local clear_loop, end_clear
@@ -53,11 +59,31 @@ copy macro arr1, arr2, len, index
     end_copy_loop:
 endm
 
-
+add_minus macro arr
+    local add_minus_loop, continue
+    clear buffer
+    mov buffer[0], 2Dh
+    xor si, si
+    mov di, 1
+    add_minus_loop:
+        mov al, arr[si]
+        cmp al, '$'
+            je continue
+        mov buffer[di], al
+        inc si
+        inc di
+        jmp add_minus_loop
+    continue:
+        clear arr
+        mov dx, di
+        inc dx
+        copy buffer arr dx 0
+endm
 
 find_point_index macro num, point_indexx
     local find_index_loop, end_find_index_loop
     xor si, si
+    xor ax, ax
     find_index_loop:
         mov al, num[si]
         cmp al, 2eh
@@ -124,16 +150,17 @@ count_frac_part macro num
 endm
 
 
-module macro num, mod_num
+module macro num, res
     local minus, plus, end_module
+    find_len_number num
     cmp num[0], 2Dh
         je minus
         jne plus
     plus:
-        copy num mod_num len_num 0
+        copy num res bx 0
         jmp end_module
     minus:
-        copy num mod_num len_num 1
+        copy num res bx 1
     end_module:
 endm
 
@@ -256,7 +283,144 @@ add_integer macro num, integer, res
 endm
 
 
-sub_integer macro num, integer, res
+compare macro num1, num2
+    local compare_loop, mov1_cmpres, mov2_cmpres, continue_loop, equal
+    local not_equal, end_compare, plus_al30, plus_bl30
+    local check_bl, check_al_bl
+    find_point_index num1 point_index
+    find_point_index num2 point_index2
+    cmp point_index, ax
+        jg mov1_cmpres
+        jl mov2_cmpres
+    xor cx, cx
+    xor si, si
+    compare_loop:
+        mov al, num1[si]
+        mov bl, num2[si]
+        cmp al, bl
+            je equal
+            jne not_equal
+        continue_loop:
+            inc si  
+            jmp compare_loop
+    equal:
+        cmp al, '$'
+            je end_compare
+            jne continue_loop
+    not_equal:
+        cmp al, 10
+            jl plus_al30
+        jmp check_bl
+        plus_al30:
+            add al, 30
+        check_bl:
+            cmp bl, 10
+                jl plus_bl30
+            jmp check_al_bl
+            plus_bl30:
+                add bl, 30
+            check_al_bl:
+                cmp al, bl
+                    jg mov1_cmpres
+                    jl mov2_cmpres 
+    mov1_cmpres:
+        mov cmpres, 1
+        jmp end_compare
+    mov2_cmpres:
+        mov cmpres, 2
+    end_compare:
+        xor ax, ax
+        xor bx, bx
+        mov al, cmpres
+endm
+
+sub_integer macro number, number2, res
+    local add_nums_loop2, sub_loop, continue_sub_loop, sub_carry_ten
+    local num_bigger, num_equal, num_less, end_sub_integer, add_toint_zeros_loop, add_nums
+    local add_nums_loop, end_add_nums, add_nums2, end_add_nums2, add_toint_zeros_loop2
+    clear buffer
+    find_len_number number
+    mov len1, bx
+    find_len_number number2
+    mov len2, bx
+    mov ax, len1
+    cmp ax, bx
+        jg num_bigger
+        jl num_less
+    num_bigger:
+        sub ax, bx
+        xor si, si
+        xor di, di
+        add_toint_zeros_loop:
+            cmp si, ax
+                je add_nums
+            mov buffer[si], 0
+            inc si
+            jmp add_toint_zeros_loop
+        add_nums:
+            mov ax, len1
+            add_nums_loop:
+                cmp si, ax
+                    je end_add_nums
+                mov bl, number2[di]
+                mov buffer[si], bl
+                inc si
+                inc di
+                jmp add_nums_loop
+        end_add_nums:
+            copy buffer number2 ax 0
+            jmp num_equal
+    num_less:
+        sub bx, ax
+        xor si, si
+        xor di, di
+        add_toint_zeros_loop2:
+            cmp si, bx
+                je add_nums2
+            mov buffer[si], 0
+            inc si
+            jmp add_toint_zeros_loop2
+        add_nums2:
+            mov ax, len2
+            add_nums_loop2:
+                cmp si, ax
+                    je end_add_nums2
+                mov bl, number[di]
+                mov buffer[si], bl
+                inc si
+                inc di
+                jmp add_nums_loop2
+        end_add_nums2:
+            mov bx, len2
+            copy buffer number bx 0
+    num_equal:
+        mov si, ax
+        mov dx, ax
+        mov di, ax
+        dec si
+        dec di
+        sub_loop:
+            inc si
+            cmp si, 0
+                je end_sub_integer
+            dec si
+            mov al, number[si]
+            mov bl, number2[di]
+            sub al, bl
+            sub al, sub_carry
+            mov sub_carry, 0
+            cmp al, 0
+                jl sub_carry_ten
+            continue_sub_loop:
+                mov res[di], al
+                dec si
+                dec di
+                jmp sub_loop
+        sub_carry_ten:
+            mov sub_carry, 1
+            add al, 10
+            jmp continue_sub_loop
+    end_sub_integer:
 endm
 
 to_float macro string, number
@@ -283,6 +447,8 @@ to_float macro string, number
 endm
 
 fill_with_zeros macro num1, num2, pind1, pind2, len1, len2
+    local less, end_fill_with_zeros, greater, fill_loop
+    local fill_loop2
     mov ax, len1
     sub ax, pind1
     dec ax
@@ -324,7 +490,9 @@ fill_with_zeros macro num1, num2, pind1, pind2, len1, len2
     end_fill_with_zeros:
 endm
 
-add_float macro num1, num2, res
+add_positive_float macro num1, num2, res
+    local add_carry, make_result, add_buf3_loop, continue_make
+    local add_buf2_loop, end_add_positive_float
     clear buffer2
     clear buffer3
     find_point_index num1 point_index
@@ -336,6 +504,183 @@ add_float macro num1, num2, res
     fill_with_zeros num1 num2 point_index point_index2 len1 len2
     inc point_index
     inc point_index2
+    modf num1 int_part frac_part
+    modf num2 int_part2 frac_part2
+    add_integer frac_part frac_part2 buffer2
+    mov al, carry
+    mov carry2, al
+    add_integer int_part int_part2 buffer3
+    xor di, di
+    xor si, si
+    cmp carry, 1
+        jne make_result
+    add_carry:
+        mov res[0], 1
+        inc di
+    make_result:
+        add_buf3_loop:
+            mov al, buffer3[si]
+            cmp al, '$'
+                je continue_make
+            mov res[di], al
+            inc si
+            inc di
+            jmp add_buf3_loop
+        continue_make:
+            xor si, si
+            mov res[di], 2eh
+            inc di
+            add_buf2_loop:
+                mov al, buffer2[si]
+                cmp al, '$'
+                    je end_add_positive_float
+                mov res[di], al
+                inc si
+                inc di
+                jmp add_buf2_loop
+    end_add_positive_float:
+endm
+
+sub_positive_float macro num1, num2, res
+    local add_carry, make_result, continue_make, add_buf3_loop
+    local add_buf2_loop, end_sub_positive_float, zero_case, continue_loop
+    local cont_add_buf3_loop, find_non_zero_loop, only_zeros
+    clear buffer2
+    clear buffer3
+    find_point_index num1 point_index
+    find_point_index num2 point_index2
+    find_len_number num1
+    mov len1, bx
+    find_len_number num2
+    mov len2, bx
+    fill_with_zeros num1 num2 point_index point_index2 len1 len2
+    inc point_index
+    inc point_index2
+    modf num1 int_part frac_part
+    modf num2 int_part2 frac_part2
+    sub_integer frac_part frac_part2 buffer2
+    mov al, sub_carry
+    mov sub_carry2, al
+    sub_integer int_part int_part2 buffer3
+    xor di, di
+    xor si, si
+    cmp carry, 1
+        jne make_result
+    add_carry:
+        mov res[0], 1
+        inc di
+    make_result:
+        find_non_zero_loop:
+            mov al, buffer3[si]
+            cmp al, '$'
+                je only_zeros
+            cmp al, 0
+                jne add_buf3_loop
+            inc si
+            jmp find_non_zero_loop
+        only_zeros:
+            mov res[di], 0
+            inc di
+            jmp continue_make
+        add_buf3_loop:
+            mov al, buffer3[si]
+            cmp al, '$'
+                je continue_make
+            mov res[di], al
+            inc si
+            inc di
+            jmp add_buf3_loop
+        continue_make:
+            xor si, si
+            mov res[di], 2eh
+            inc di
+            add_buf2_loop:
+                mov al, buffer2[si]
+                cmp al, '$'
+                    je end_sub_positive_float
+                mov res[di], al
+                inc si
+                inc di
+                jmp add_buf2_loop
+    end_sub_positive_float:
+endm
+
+sub_positive_float_right macro num1, num2, res
+    local sub1, sub2, end_sub_positive_float_right
+    compare num1 num2
+    cmp cmpres, 2
+        je sub1
+    jmp sub2
+    sub1:
+        sub_positive_float num1 num2 res
+        jmp end_sub_positive_float_right
+    sub2:
+        sub_positive_float num2 num1 res
+    end_sub_positive_float_right:
+endm
+
+add_float macro num1, num2, res
+    local num1_minus, both_minus, res_loop, end_add_float
+    local not_both_minus, num1_plus, not_both_minus2, both_plus
+    local continue_res_loop, cmpres1, cmpres2
+    clear buffer4
+    clear buffer5
+    clear buffer
+    cmp num1[0], 2Dh
+        je num1_minus
+    jmp num1_plus
+    num1_minus:
+        cmp num2[0], 2Dh
+            je both_minus
+        jmp not_both_minus
+        both_minus:
+            module num1 buffer4
+            module num2 buffer5
+            add_positive_float buffer4 buffer5 buffer
+            mov res[0], 2Dh
+            xor si, si
+            mov di, 1
+            res_loop:
+                mov al, buffer[si]
+                cmp al, '$'
+                    jne continue_res_loop
+                jmp end_add_float
+                continue_res_loop:
+                    mov res[di], al
+                    inc di
+                    inc si
+                    jmp res_loop
+        not_both_minus:
+            module num1 buffer4
+            sub_positive_float_right buffer4 num2 res
+            cmp cmpres, 1
+                je cmpres1
+            jmp end_add_float
+            cmpres1:
+                add_minus res
+            jmp end_add_float
+    num1_plus:
+        cmp num2[0], 2Dh
+            jne both_plus
+        jmp not_both_minus2
+        both_plus:
+            add_positive_float num1 num2 res
+            jmp end_add_float
+        not_both_minus2:
+            module num2 buffer4
+            sub_positive_float_right num1 buffer4 res
+            cmp cmpres, 2
+                je cmpres2
+            jmp end_add_float
+            cmpres2:
+                add_minus res
+    end_add_float:
+endm
+
+sub_float macro num1, num2, res
+    clear buffer4
+    clear buffer5
+    clear buffer
     cmp num1[0], 2Dh
         je num1_minus
         jne num1_plus
@@ -344,7 +689,6 @@ add_float macro num1, num2, res
             je both_minus
             jne not_both_minus
         both_minus:
-
         not_both_minus:
     num1_plus:
         cmp num2[0], 2Dh
@@ -352,41 +696,8 @@ add_float macro num1, num2, res
             jne both_plus
         not_both_minus2:
         both_plus:
-            modf num1 int_part frac_part
-            modf num2 int_part2 frac_part2
-            add_integer frac_part frac_part2 buffer2
-            mov al, carry
-            mov carry2, al
-            add_integer int_part int_part2 buffer3
-            xor di, di
-            xor si, si
-            cmp carry, 1
-               jne make_result
-            add_carry:
-                mov res[0], 1
-                inc di
-            make_result:
-                add_buf3_loop:
-                    mov al, buffer3[si]
-                    cmp al, '$'
-                        je continue_make
-                    mov res[di], al
-                    inc si
-                    inc di
-                    jmp add_buf3_loop
-                continue_make:
-                    xor si, si
-                    mov res[di], 2eh
-                    inc di
-                    add_buf2_loop:
-                        mov al, buffer2[si]
-                        cmp al, '$'
-                            je end_add_float
-                        mov res[di], al
-                        inc si
-                        inc di
-                        jmp add_buf2_loop
-    end_add_float:
+
+    end_sub_float:
 endm
 
 to_str macro number, string
@@ -413,7 +724,7 @@ to_str macro number, string
 endm
 
 
-ceil macro num, res ;Возвращает наименьшее целое число большее, либо равное num
+ceil macro num, res ;Возвращает наименьшее целое число большее num
     local count_int_part_loop, end_count_int_part_loop, end_ceil
     xor si, si
     xor di, di
@@ -447,7 +758,9 @@ ceil macro num, res ;Возвращает наименьшее целое чис
     end_ceil:
 endm
 
-floor macro num, res ;Возвращает наибольшее целое число меньше или равное num
+floor macro num, res ;Возвращает наибольшее целое число меньше num
+    local plus_floor, minus_floor, count_int_part_loop, end_floor
+    local count_int_part_loop2, continue, continue_loop, point
     cmp num[0], 2Dh
         je minus_floor
         jne plus_floor
@@ -456,10 +769,12 @@ floor macro num, res ;Возвращает наибольшее целое чи�
         count_int_part_loop:
             mov al, num[si]
             cmp al, 2eh
-                je end_floor
-            mov res[si], al
-            inc si
-            jmp count_int_part_loop
+                jne point
+            jmp end_floor
+            point:
+                mov res[si], al
+                inc si
+                jmp count_int_part_loop
     minus_floor:
         xor si, si
         count_int_part_loop2:
@@ -469,7 +784,7 @@ floor macro num, res ;Возвращает наибольшее целое чи�
             cmp al, 2Dh
                 je continue_loop
             mov res[si], al
-            continue_loop
+            continue_loop:
                 mov buffer[si], 0
                 inc si
                 jmp count_int_part_loop2
@@ -522,7 +837,7 @@ endm
 input macro string
 	xor ax, ax
     xor dx, dx
-    mov dx, offset string
+    lea dx, string
 	mov ah, 0ah
 	int 21h
 endm
@@ -530,44 +845,44 @@ endm
 start:
     mov ax, data
     mov ds, ax
-    input string
-    print dummy
+    ;input string
+    ;print dummy
     
-    to_float string number
+    ;to_float string number
     input string2
     print dummy
     to_str number string
     to_float string2 number2
    ; print number
-    print string
-    print dummy
     ;print dummy
-    ceil number result
-    to_str result string
-    print string
-    print dummy
+    ;ceil number result
+    ;to_str result string
+    ;print string
+    ;print dummy
 
-    modf number int_part frac_part
+    ;modf number int_part frac_part
 
-    to_str int_part string
-    print string
-    print dummy
-    print dummy
+    ;to_str int_part string
+   ; print string
+   ; print dummy
+   ; print dummy
     ;print result
     ;input string2
     ;print dummy
     ;to_float string2 number2
     ;print string
     ;module number
-    add_float number number2 result2
-    to_str buffer2 string
-    to_str buffer3 string2
-    print string
-    print dummy
-    print string2
-    print dummy
-
-    to_str result2 string2
+    ;add_float number number2 result2
+    ;to_str buffer2 string
+    ;to_str buffer3 string2
+    ;print string
+    ;print dummy
+    ;print string2
+    ;print dummy
+    ;sub_positive_float number number2 result
+    ;add_float number number2 result
+    ;floor number2 result
+    to_str result string2
     print string2
     ;print result2
     mov ah, 4ch
